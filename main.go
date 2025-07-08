@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"time"
 
@@ -188,8 +189,8 @@ func handleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 		}
 
 		text := fmt.Sprintf("Тренировка завершена! Длительность: %s\nОбщее время сегодня: %s",
-			duration.Truncate(time.Second).String(),
-			total.Truncate(time.Second).String())
+			formatDuration(duration),
+			formatDuration(total))
 
 		// Удаляем сообщение с кнопкой
 		deleteMsg := tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID)
@@ -198,4 +199,17 @@ func handleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 		// Отправляем сообщение с результатом
 		bot.Send(tgbotapi.NewMessage(chatID, text))
 	}
+}
+
+func formatDuration(d time.Duration) string {
+	// Округляем до ближайшей секунды
+	seconds := int(math.Round(d.Seconds()))
+
+	minutes := seconds / 60
+	seconds = seconds % 60
+
+	if minutes > 0 {
+		return fmt.Sprintf("%d мин %d сек", minutes, seconds)
+	}
+	return fmt.Sprintf("%d сек", seconds)
 }
