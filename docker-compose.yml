@@ -14,7 +14,7 @@ services:
       - postgres
 
   postgres:
-    image: postgres:15
+    image: postgres:17
     restart: always
     environment:
       POSTGRES_USER: botuser
@@ -22,6 +22,10 @@ services:
       POSTGRES_DB: botdb
     volumes:
       - pgdata:/var/lib/postgresql/data
-
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U botuser"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 volumes:
   pgdata:
