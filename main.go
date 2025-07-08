@@ -142,6 +142,7 @@ func handleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 	case "/calendar":
 		days, err := getWorkoutsByDay(userID)
 		if err != nil {
+			log.Printf("Ошибка при получении данных календаря для user %d: %v", userID, err)
 			bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Ошибка при получении данных календаря"))
 			return
 		}
