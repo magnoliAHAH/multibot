@@ -131,20 +131,43 @@ func getTotalWorkoutToday(userID int64) (time.Duration, error) {
 
 func handleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 	userID := int64(msg.From.ID)
+
 	// Сохраняем пользователя при любом сообщении
 	err := saveUser(userID, msg.From.UserName, msg.From.FirstName, msg.From.LastName)
 	if err != nil {
 		log.Println("Error saving user:", err)
 	}
 
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🏋️ Начать тренировку", "start_workout"),
-		),
-	)
-	m := tgbotapi.NewMessage(msg.Chat.ID, "Нажми кнопку, чтобы начать тренировку")
-	m.ReplyMarkup = keyboard
-	bot.Send(m)
+	switch msg.Text {
+	case "/calendar":
+		days, err := getWorkoutsByDay(userID)
+		if err != nil {
+			bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Ошибка при получении данных календаря"))
+			return
+		}
+
+		if len(days) == 0 {
+			bot.Send(tgbotapi.NewMessage(msg.Chat.ID, "Нет данных о тренировках."))
+			return
+		}
+
+		text := "Календарь тренировок:\n"
+		for _, d := range days {
+			text += fmt.Sprintf("%s — %s\n", d.Day.Format("02.01.2006"), formatDurationCalendar(d.TotalDuration))
+		}
+
+		bot.Send(tgbotapi.NewMessage(msg.Chat.ID, text))
+
+	default:
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🏋️ Начать тренировку", "start_workout"),
+			),
+		)
+		m := tgbotapi.NewMessage(msg.Chat.ID, "Нажми кнопку, чтобы начать тренировку")
+		m.ReplyMarkup = keyboard
+		bot.Send(m)
+	}
 }
 
 func handleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
@@ -212,4 +235,47 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%d мин %d сек", minutes, seconds)
 	}
 	return fmt.Sprintf("%d сек", seconds)
+}
+
+type DayWorkout struct {
+	Day           time.Time
+	TotalDuration time.Duration
+}
+
+func getWorkoutsByDay(userID int64) ([]DayWorkout, error) {
+	rows, err := db.Query(`
+		SELECT DATE(start_time) AS day, SUM(duration)
+		FROM workouts
+		WHERE user_id = $1
+		GROUP BY day
+		ORDER BY day
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []DayWorkout
+	for rows.Next() {
+		var day time.Time
+		var duration time.Duration
+		err = rows.Scan(&day, &duration)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, DayWorkout{Day: day, TotalDuration: duration})
+	}
+	return results, nil
+}
+
+func formatDurationCalendar(d time.Duration) string {
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	s := int(d.Seconds()) % 60
+	if h > 0 {
+		return fmt.Sprintf("%dh %dm %ds", h, m, s)
+	} else if m > 0 {
+		return fmt.Sprintf("%dm %ds", m, s)
+	}
+	return fmt.Sprintf("%ds", s)
 }
