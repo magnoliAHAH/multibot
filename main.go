@@ -45,7 +45,9 @@ func handleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 }
 
 func handleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
-	userID := int64(callback.From.ID) // cast to int64
+	bot.AnswerCallbackQuery(tgbotapi.NewCallback(callback.ID, "")) // обязательный ответ
+
+	userID := int64(callback.From.ID)
 	chatID := callback.Message.Chat.ID
 
 	switch callback.Data {
@@ -71,9 +73,7 @@ func handleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 		duration := time.Since(startTime)
 		delete(sessions, userID)
 
-		minutes := int(duration.Minutes())
-		text := "Тренировка завершена! Длительность: " + time.Duration(minutes*int(time.Minute)).String()
-
+		text := "Тренировка завершена! Длительность: " + duration.Truncate(time.Second).String()
 		bot.Send(tgbotapi.NewMessage(chatID, text))
 
 		// TODO: сохранение в БД
