@@ -110,32 +110,20 @@ func saveWorkout(userID int64, start time.Time, duration time.Duration) error {
 
 func getTotalWorkoutToday(userID int64) (time.Duration, error) {
 	startOfDay := time.Now().Truncate(24 * time.Hour)
-	var total time.Duration
 
+	var seconds float64
 	row := db.QueryRow(`
-		SELECT COALESCE(SUM(duration), '0 seconds'::interval)
+		SELECT EXTRACT(EPOCH FROM COALESCE(SUM(duration), INTERVAL '0'))
 		FROM workouts
 		WHERE user_id = $1 AND start_time >= $2
 	`, userID, startOfDay)
 
-	var interval string
-	err := row.Scan(&interval)
+	err := row.Scan(&seconds)
 	if err != nil {
 		return 0, err
 	}
 
-	total, err = time.ParseDuration(interval)
-	if err != nil {
-		// PostgreSQL interval -> string преобразование может быть не прямо совместим,
-		// попробуем парсить по-другому
-		// например, "01:23:45" -> parse как час:мин:сек
-		t, err2 := time.Parse("15:04:05", interval)
-		if err2 != nil {
-			return 0, err
-		}
-		total = time.Duration(t.Hour())*time.Hour + time.Duration(t.Minute())*time.Minute + time.Duration(t.Second())*time.Second
-	}
-	return total, nil
+	return time.Duration(seconds * float64(time.Second)), nil
 }
 
 func handleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
