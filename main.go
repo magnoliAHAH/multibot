@@ -245,12 +245,12 @@ type DayWorkout struct {
 
 func getWorkoutsByDay(userID int64) ([]DayWorkout, error) {
 	rows, err := db.Query(`
-		SELECT DATE(start_time) AS day, SUM(duration)
-		FROM workouts
-		WHERE user_id = $1
-		GROUP BY day
-		ORDER BY day
-	`, userID)
+        SELECT DATE(start_time) AS day, EXTRACT(EPOCH FROM SUM(duration)) as seconds
+        FROM workouts
+        WHERE user_id = $1
+        GROUP BY day
+        ORDER BY day
+    `, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -259,11 +259,12 @@ func getWorkoutsByDay(userID int64) ([]DayWorkout, error) {
 	var results []DayWorkout
 	for rows.Next() {
 		var day time.Time
-		var duration time.Duration
-		err = rows.Scan(&day, &duration)
+		var seconds float64
+		err = rows.Scan(&day, &seconds)
 		if err != nil {
 			return nil, err
 		}
+		duration := time.Duration(seconds * float64(time.Second))
 		results = append(results, DayWorkout{Day: day, TotalDuration: duration})
 	}
 	return results, nil
