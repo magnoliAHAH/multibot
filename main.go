@@ -1,16 +1,34 @@
 package main
 
 import (
+	"database/sql"
+	"fmt"
 	"log"
 	"os"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	_ "github.com/lib/pq"
 )
 
-var sessions = make(map[int64]time.Time)
+var (
+	sessions = make(map[int64]time.Time)
+	db       *sql.DB
+)
 
 func main() {
+	var err error
+	db, err = connectDB()
+	if err != nil {
+		log.Fatalf("Failed to connect to DB: %v", err)
+	}
+	defer db.Close()
+
+	err = createTables()
+	if err != nil {
+		log.Fatalf("Failed to create tables: %v", err)
+	}
+
 	bot, err := tgbotapi.NewBotAPI(os.Getenv("BOT_TOKEN"))
 	if err != nil {
 		log.Panic(err)
@@ -31,8 +49,103 @@ func main() {
 	}
 }
 
+func connectDB() (*sql.DB, error) {
+	host := os.Getenv("POSTGRES_HOST")
+	port := os.Getenv("POSTGRES_PORT")
+	user := os.Getenv("POSTGRES_USER")
+	password := os.Getenv("POSTGRES_PASSWORD")
+	dbname := os.Getenv("POSTGRES_DB")
+
+	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		host, port, user, password, dbname)
+
+	return sql.Open("postgres", connStr)
+}
+
+func createTables() error {
+	userTable := `
+	CREATE TABLE IF NOT EXISTS users (
+		id BIGINT PRIMARY KEY,
+		username TEXT,
+		first_name TEXT,
+		last_name TEXT
+	);`
+
+	workoutTable := `
+	CREATE TABLE IF NOT EXISTS workouts (
+		id SERIAL PRIMARY KEY,
+		user_id BIGINT REFERENCES users(id),
+		start_time TIMESTAMP NOT NULL,
+		duration INTERVAL NOT NULL
+	);`
+
+	_, err := db.Exec(userTable)
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(workoutTable)
+	return err
+}
+
+func saveUser(userID int64, username, firstName, lastName string) error {
+	_, err := db.Exec(`
+		INSERT INTO users (id, username, first_name, last_name)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (id) DO UPDATE
+		SET username = EXCLUDED.username,
+			first_name = EXCLUDED.first_name,
+			last_name = EXCLUDED.last_name
+	`, userID, username, firstName, lastName)
+	return err
+}
+
+func saveWorkout(userID int64, start time.Time, duration time.Duration) error {
+	_, err := db.Exec(`
+		INSERT INTO workouts (user_id, start_time, duration)
+		VALUES ($1, $2, $3)
+	`, userID, start, duration)
+	return err
+}
+
+func getTotalWorkoutToday(userID int64) (time.Duration, error) {
+	startOfDay := time.Now().Truncate(24 * time.Hour)
+	var total time.Duration
+
+	row := db.QueryRow(`
+		SELECT COALESCE(SUM(duration), '0 seconds'::interval)
+		FROM workouts
+		WHERE user_id = $1 AND start_time >= $2
+	`, userID, startOfDay)
+
+	var interval string
+	err := row.Scan(&interval)
+	if err != nil {
+		return 0, err
+	}
+
+	total, err = time.ParseDuration(interval)
+	if err != nil {
+		// PostgreSQL interval -> string преобразование может быть не прямо совместим,
+		// попробуем парсить по-другому
+		// например, "01:23:45" -> parse как час:мин:сек
+		t, err2 := time.Parse("15:04:05", interval)
+		if err2 != nil {
+			return 0, err
+		}
+		total = time.Duration(t.Hour())*time.Hour + time.Duration(t.Minute())*time.Minute + time.Duration(t.Second())*time.Second
+	}
+	return total, nil
+}
+
 func handleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
-	// Если пришло любое сообщение или /start, покажем кнопку "Начать тренировку"
+	userID := int64(msg.From.ID)
+	// Сохраняем пользователя при любом сообщении
+	err := saveUser(userID, msg.From.UserName, msg.From.FirstName, msg.From.LastName)
+	if err != nil {
+		log.Println("Error saving user:", err)
+	}
+
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("🏋️ Начать тренировку", "start_workout"),
@@ -44,7 +157,6 @@ func handleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
 }
 
 func handleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
-	// Обязательно отвечаем Telegram, чтобы кнопка не подвисала
 	bot.AnswerCallbackQuery(tgbotapi.NewCallback(callback.ID, ""))
 
 	userID := int64(callback.From.ID)
@@ -59,7 +171,6 @@ func handleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 				tgbotapi.NewInlineKeyboardButtonData("✅ Закончить тренировку", "stop_workout"),
 			),
 		)
-		// Редактируем сообщение с кнопкой, меняем текст и кнопку
 		edit := tgbotapi.NewEditMessageText(chatID, callback.Message.MessageID, "Тренировка началась!")
 		edit.ReplyMarkup = &keyboard
 		bot.Send(edit)
@@ -74,15 +185,27 @@ func handleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 		duration := time.Since(startTime)
 		delete(sessions, userID)
 
-		text := "Тренировка завершена! Длительность: " + duration.Truncate(time.Second).String()
+		// Сохраняем тренировку в БД
+		err := saveWorkout(userID, startTime, duration)
+		if err != nil {
+			log.Println("Error saving workout:", err)
+		}
 
-		// Удаляем старое сообщение с кнопкой "Закончить тренировку"
+		// Получаем суммарное время тренировок за сегодня
+		total, err := getTotalWorkoutToday(userID)
+		if err != nil {
+			log.Println("Error getting total workout time:", err)
+		}
+
+		text := fmt.Sprintf("Тренировка завершена! Длительность: %s\nОбщее время сегодня: %s",
+			duration.Truncate(time.Second).String(),
+			total.Truncate(time.Second).String())
+
+		// Удаляем сообщение с кнопкой
 		deleteMsg := tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID)
 		bot.Send(deleteMsg)
 
-		// Отправляем новое сообщение с итогом тренировки (без кнопок)
+		// Отправляем сообщение с результатом
 		bot.Send(tgbotapi.NewMessage(chatID, text))
-
-		// TODO: сохранение в БД
 	}
 }

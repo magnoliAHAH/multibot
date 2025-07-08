@@ -3,7 +3,25 @@ version: '3.3'
 services:
   bot:
     build: .
-    container_name: telegram-bot
-    restart: unless-stopped
-    env_file:
-      - .env
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=botuser
+      - POSTGRES_PASSWORD=botpass
+      - POSTGRES_DB=botdb
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_USER: botuser
+      POSTGRES_PASSWORD: botpass
+      POSTGRES_DB: botdb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
