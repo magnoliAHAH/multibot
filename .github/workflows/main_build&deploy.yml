@@ -21,5 +21,6 @@ jobs:
           script: |
             rm -rf multibot
             git clone https://github.com/magnoliAHAH/multibot.git && cd multibot
+            docker-compose down
             export BOT_TOKEN=${{ secrets.BOT_TOKEN }}
             docker-compose up -d --build
