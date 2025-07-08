@@ -101,10 +101,12 @@ func saveUser(userID int64, username, firstName, lastName string) error {
 }
 
 func saveWorkout(userID int64, start time.Time, duration time.Duration) error {
+	// Преобразуем duration в строку — формат '1h2m3s', понятный PostgreSQL
+	durationStr := duration.String()
 	_, err := db.Exec(`
 		INSERT INTO workouts (user_id, start_time, duration)
-		VALUES ($1, $2, $3)
-	`, userID, start, duration)
+		VALUES ($1, $2, $3::interval)
+	`, userID, start, durationStr)
 	return err
 }
 
