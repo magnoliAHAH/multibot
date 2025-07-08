@@ -19,5 +19,7 @@ jobs:
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           script: |
+            rm -rf multibot
             git clone https://github.com/magnoliAHAH/multibot.git && cd multibot
+            echo "BOT_TOKEN=$BOT_TOKEN" > .env
             docker compose up -d --build
