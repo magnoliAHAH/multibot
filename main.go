@@ -8,7 +8,9 @@ import (
 )
 
 func main() {
+
 	botToken := os.Getenv("BOT_TOKEN")
+	log.Println("BOT_TOKEN:", botToken)
 
 	bot, err := tgbotapi.NewBotAPI(botToken)
 	if err != nil {
