@@ -32,20 +32,20 @@ func main() {
 }
 
 func handleMessage(bot *tgbotapi.BotAPI, msg *tgbotapi.Message) {
-	if msg.Text == "/workout" {
-		keyboard := tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("🏋️ Начать тренировку", "start_workout"),
-			),
-		)
-		m := tgbotapi.NewMessage(msg.Chat.ID, "Нажми кнопку, чтобы начать тренировку")
-		m.ReplyMarkup = keyboard
-		bot.Send(m)
-	}
+	// Если пришло любое сообщение или /start, покажем кнопку "Начать тренировку"
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🏋️ Начать тренировку", "start_workout"),
+		),
+	)
+	m := tgbotapi.NewMessage(msg.Chat.ID, "Нажми кнопку, чтобы начать тренировку")
+	m.ReplyMarkup = keyboard
+	bot.Send(m)
 }
 
 func handleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
-	bot.AnswerCallbackQuery(tgbotapi.NewCallback(callback.ID, "")) // обязательный ответ
+	// Обязательно отвечаем Telegram, чтобы кнопка не подвисала
+	bot.AnswerCallbackQuery(tgbotapi.NewCallback(callback.ID, ""))
 
 	userID := int64(callback.From.ID)
 	chatID := callback.Message.Chat.ID
@@ -59,9 +59,10 @@ func handleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 				tgbotapi.NewInlineKeyboardButtonData("✅ Закончить тренировку", "stop_workout"),
 			),
 		)
-		msg := tgbotapi.NewEditMessageText(chatID, callback.Message.MessageID, "Тренировка началась!")
-		msg.ReplyMarkup = &keyboard
-		bot.Send(msg)
+		// Редактируем сообщение с кнопкой, меняем текст и кнопку
+		edit := tgbotapi.NewEditMessageText(chatID, callback.Message.MessageID, "Тренировка началась!")
+		edit.ReplyMarkup = &keyboard
+		bot.Send(edit)
 
 	case "stop_workout":
 		startTime, ok := sessions[userID]
@@ -74,6 +75,12 @@ func handleCallback(bot *tgbotapi.BotAPI, callback *tgbotapi.CallbackQuery) {
 		delete(sessions, userID)
 
 		text := "Тренировка завершена! Длительность: " + duration.Truncate(time.Second).String()
+
+		// Удаляем старое сообщение с кнопкой "Закончить тренировку"
+		deleteMsg := tgbotapi.NewDeleteMessage(chatID, callback.Message.MessageID)
+		bot.Send(deleteMsg)
+
+		// Отправляем новое сообщение с итогом тренировки (без кнопок)
 		bot.Send(tgbotapi.NewMessage(chatID, text))
 
 		// TODO: сохранение в БД
